@@ -127,7 +127,7 @@ public class AtomConstructor implements TruffleObject {
    */
   @Override
   public String toString() {
-    return name;
+    return name + "COOONS";
   }
 
   /**

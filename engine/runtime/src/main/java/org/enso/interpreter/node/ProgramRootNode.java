@@ -6,6 +6,7 @@ import com.oracle.truffle.api.nodes.NodeInfo;
 import com.oracle.truffle.api.nodes.RootNode;
 import com.oracle.truffle.api.source.Source;
 import org.enso.interpreter.Language;
+import org.enso.interpreter.runtime.Context;
 import org.enso.interpreter.runtime.Module;
 import org.enso.pkg.QualifiedName;
 
@@ -20,7 +21,7 @@ import org.enso.pkg.QualifiedName;
 @NodeInfo(shortName = "ProgramRoot", description = "The root of an Enso program's execution")
 public class ProgramRootNode extends RootNode {
   private final Source sourceCode;
-  private @CompilerDirectives.CompilationFinal Module module;
+  private @CompilerDirectives.CompilationFinal Object module;
 
   ProgramRootNode(Language language, Source sourceCode) {
     super(language);
@@ -48,7 +49,12 @@ public class ProgramRootNode extends RootNode {
   public Object execute(VirtualFrame frame) {
     if (module == null) {
       CompilerDirectives.transferToInterpreterAndInvalidate();
-      module = new Module(QualifiedName.simpleName(sourceCode.getName()), sourceCode);
+      Context ctx = lookupContextReference(Language.class).get();
+      module =
+          ctx.getEnvironment()
+              .asGuestValue(
+                  new Module.PolyglotView(
+                      new Module(QualifiedName.simpleName(sourceCode.getName()), sourceCode), ctx));
     }
     // Note [Static Passes]
     return module;

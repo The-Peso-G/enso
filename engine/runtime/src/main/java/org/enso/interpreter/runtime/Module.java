@@ -1,5 +1,6 @@
 package org.enso.interpreter.runtime;
 
+import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.TruffleFile;
 import com.oracle.truffle.api.dsl.Cached;
 import com.oracle.truffle.api.dsl.CachedContext;
@@ -27,8 +28,7 @@ import org.enso.polyglot.LanguageInfo;
 import org.enso.polyglot.MethodNames;
 
 /** Represents a source module with a known location. */
-@ExportLibrary(InteropLibrary.class)
-public class Module implements TruffleObject {
+public class Module {
   private ModuleScope scope;
   private TruffleFile sourceFile;
   private Source literalSource;
@@ -106,72 +106,60 @@ public class Module implements TruffleObject {
     }
   }
 
-  /**
-   * Handles member invocations through the polyglot API.
-   *
-   * <p>The exposed members are:
-   * <li>{@code get_method(AtomConstructor, String)}
-   * <li>{@code get_constructor(String)}
-   * <li>{@code patch(String)}
-   * <li>{@code get_associated_constructor()}
-   * <li>{@code eval_expression(String)}
-   */
-  @ExportMessage
-  abstract static class InvokeMember {
-    private static Function getMethod(ModuleScope scope, Object[] args)
-        throws ArityException, UnsupportedTypeException {
-      Types.Pair<AtomConstructor, String> arguments =
-          Types.extractArguments(args, AtomConstructor.class, String.class);
-      AtomConstructor cons = arguments.getFirst();
-      String name = arguments.getSecond();
-      return scope.getMethods().get(cons).get(name);
+  public static class PolyglotView {
+    private final Module module;
+    private final Context context;
+
+    public PolyglotView(Module module, Context context) {
+      this.module = module;
+      this.context = context;
     }
 
-    private static AtomConstructor getConstructor(ModuleScope scope, Object[] args)
-        throws ArityException, UnsupportedTypeException {
-      String name = Types.extractArguments(args, String.class);
-      return scope.getConstructors().get(name);
+    @CompilerDirectives.TruffleBoundary
+    public Function get_method(AtomConstructor cons, String name) {
+      return module.getScope(context).getMethods().get(cons).get(name);
     }
 
-    private static Module patch(Module module, Object[] args, Context context)
-        throws ArityException, UnsupportedTypeException {
+    @CompilerDirectives.TruffleBoundary
+    public AtomConstructor get_constructor(String name) {
+      return module.getScope(context).getConstructors().get(name);
+    }
+
+    @CompilerDirectives.TruffleBoundary
+    public Module.PolyglotView patch(String sourceString) {
       ModuleScope scope = module.getScope(context);
-      String sourceString = Types.extractArguments(args, String.class);
       Source source =
           Source.newBuilder(LanguageInfo.ID, sourceString, scope.getAssociatedType().getName())
               .build();
       context.compiler().run(source, scope);
-      return module;
+      return this;
     }
 
-    private static Module reparse(Module module, Object[] args, Context context)
-        throws ArityException {
-      Types.extractArguments(args);
+    @CompilerDirectives.TruffleBoundary
+    public Module.PolyglotView reparse() {
       module.parse(context);
-      return module;
+      return this;
     }
 
-    private static Module setSource(Module module, Object[] args, Context context)
-        throws ArityException, UnsupportedTypeException {
-      String source = Types.extractArguments(args, String.class);
+    @CompilerDirectives.TruffleBoundary
+    public Module.PolyglotView set_source(String source) {
       module.setLiteralSource(
           Source.newBuilder(LanguageInfo.ID, source, module.name.module()).build());
-      return module;
+      return this;
     }
 
-    private static Module setSourceFile(Module module, Object[] args, Context context)
-        throws ArityException, UnsupportedTypeException {
-      String file = Types.extractArguments(args, String.class);
+    @CompilerDirectives.TruffleBoundary
+    public Module.PolyglotView set_source_file(String file) {
       module.setSourceFile(context.getTruffleFile(new File(file)));
-      return module;
+      return this;
     }
 
-    private static AtomConstructor getAssociatedConstructor(ModuleScope scope, Object[] args)
-        throws ArityException {
-      Types.extractArguments(args);
-      return scope.getAssociatedType();
+    @CompilerDirectives.TruffleBoundary
+    public AtomConstructor get_associated_constructor() {
+      return module.getScope(context).getAssociatedType();
     }
 
+    @CompilerDirectives.TruffleBoundary
     private static Object evalExpression(
         ModuleScope scope, Object[] args, Context context, CallOptimiserNode callOptimiserNode)
         throws ArityException, UnsupportedTypeException {
@@ -188,83 +176,5 @@ public class Module implements TruffleObject {
           .executeDispatch(eval, callerInfo, state, new Object[] {debug, expr})
           .getValue();
     }
-
-    @Specialization
-    static Object doInvoke(
-        Module module,
-        String member,
-        Object[] arguments,
-        @CachedContext(Language.class) Context context,
-        @Cached(value = "build()", allowUncached = true) CallOptimiserNode callOptimiserNode)
-        throws UnknownIdentifierException, ArityException, UnsupportedTypeException {
-      ModuleScope scope = module.getScope(context);
-      switch (member) {
-        case MethodNames.Module.GET_METHOD:
-          return getMethod(scope, arguments);
-        case MethodNames.Module.GET_CONSTRUCTOR:
-          return getConstructor(scope, arguments);
-        case MethodNames.Module.PATCH:
-          return patch(module, arguments, context);
-        case MethodNames.Module.REPARSE:
-          return reparse(module, arguments, context);
-        case MethodNames.Module.SET_SOURCE:
-          return setSource(module, arguments, context);
-        case MethodNames.Module.SET_SOURCE_FILE:
-          return setSourceFile(module, arguments, context);
-        case MethodNames.Module.GET_ASSOCIATED_CONSTRUCTOR:
-          return getAssociatedConstructor(scope, arguments);
-        case MethodNames.Module.EVAL_EXPRESSION:
-          return evalExpression(scope, arguments, context, callOptimiserNode);
-        default:
-          throw UnknownIdentifierException.create(member);
-      }
-    }
-  }
-
-  /**
-   * Marks the object as having members for the purposes of the polyglot API.
-   *
-   * @return {@code true}
-   */
-  @ExportMessage
-  boolean hasMembers() {
-    return true;
-  }
-
-  /**
-   * Exposes a member method validity check for the polyglot API.
-   *
-   * @param member the member to check
-   * @return {@code true} if the member is supported, {@code false} otherwise.
-   */
-  @ExportMessage
-  boolean isMemberInvocable(String member) {
-    return member.equals(MethodNames.Module.GET_METHOD)
-        || member.equals(MethodNames.Module.GET_CONSTRUCTOR)
-        || member.equals(MethodNames.Module.PATCH)
-        || member.equals(MethodNames.Module.REPARSE)
-        || member.equals(MethodNames.Module.SET_SOURCE)
-        || member.equals(MethodNames.Module.SET_SOURCE_FILE)
-        || member.equals(MethodNames.Module.GET_ASSOCIATED_CONSTRUCTOR)
-        || member.equals(MethodNames.Module.EVAL_EXPRESSION);
-  }
-
-  /**
-   * Returns a collection of all the supported members in this scope for the polyglot API.
-   *
-   * @param includeInternal ignored.
-   * @return a collection of all the member names.
-   */
-  @ExportMessage
-  Object getMembers(boolean includeInternal) {
-    return new Vector(
-        MethodNames.Module.GET_METHOD,
-        MethodNames.Module.GET_CONSTRUCTOR,
-        MethodNames.Module.PATCH,
-        MethodNames.Module.REPARSE,
-        MethodNames.Module.SET_SOURCE,
-        MethodNames.Module.SET_SOURCE_FILE,
-        MethodNames.Module.GET_ASSOCIATED_CONSTRUCTOR,
-        MethodNames.Module.EVAL_EXPRESSION);
   }
 }

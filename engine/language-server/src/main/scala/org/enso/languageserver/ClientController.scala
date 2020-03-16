@@ -23,21 +23,9 @@ import org.enso.languageserver.filemanager.{
 }
 import org.enso.languageserver.jsonrpc.Errors.ServiceError
 import org.enso.languageserver.jsonrpc._
-import org.enso.languageserver.requesthandler.{
-  AcquireCapabilityHandler,
-  ApplyEditHandler,
-  CloseFileHandler,
-  OpenFileHandler,
-  ReleaseCapabilityHandler,
-  SaveFileHandler
-}
-import org.enso.languageserver.text.TextApi.{
-  ApplyEdit,
-  CloseFile,
-  OpenFile,
-  SaveFile,
-  TextDidChange
-}
+import org.enso.languageserver.requesthandler._
+import org.enso.languageserver.runtime.ExecutionApi.CreateCtx
+import org.enso.languageserver.text.TextApi._
 import org.enso.languageserver.text.TextProtocol
 
 import scala.concurrent.duration._
@@ -65,6 +53,7 @@ object ClientApi {
     .registerRequest(CopyFile)
     .registerRequest(MoveFile)
     .registerRequest(ExistsFile)
+    .registerRequest(CreateCtx)
     .registerNotification(ForceReleaseCapability)
     .registerNotification(GrantCapability)
     .registerNotification(TextDidChange)
@@ -106,7 +95,8 @@ class ClientController(
         .props(bufferRegistry, requestTimeout, client),
       ApplyEdit -> ApplyEditHandler
         .props(bufferRegistry, requestTimeout, client),
-      SaveFile -> SaveFileHandler.props(bufferRegistry, requestTimeout, client)
+      SaveFile  -> SaveFileHandler.props(bufferRegistry, requestTimeout, client),
+      CreateCtx -> CreateCtxHandler.props(ctxRegistry, requestTimeout, client)
     )
 
   override def unhandled(message: Any): Unit =
